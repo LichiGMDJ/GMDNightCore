@@ -1,0 +1,74 @@
+name: Tournament system
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tournament-system:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_DATABASE: nightcore_tournaments
+          MARIADB_USER: nightcore
+          MARIADB_PASSWORD: nightcore
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_DEBUG: 1
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: nightcore_tournaments
+      DB_USER: nightcore
+      DB_PASS: nightcore
+      DB_CHARSET: utf8mb4
+      CORE_TABLE_PREFIX: tm_
+      ACCOUNT_PREACTIVATE: 1
+      AUTH_MAX_ATTEMPTS: 0
+      LEVEL_UPLOAD_COOLDOWN_SECONDS: 0
+      LEVEL_STORAGE_PATH: /tmp/nightcore-tournament-levels
+      TOURNAMENTS_MODE: enabled
+      TOURNAMENT_PREDICTIONS_MODE: enabled
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql
+          coverage: none
+      - name: Tournament PHP syntax
+        run: |
+          find src/Domain/Tournaments src/Web/Tournaments public tests -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Feature policy
+        run: php tests/tournament_feature_policy.php
+      - name: Bracket helpers
+        run: php tests/tournament_bracket_logic.php
+      - name: Full tournament lifecycle
+        run: php tests/tournament_system.php
+      - name: Tournament web and API smoke
+        run: |
+          php -S 127.0.0.1:8098 -t public >/tmp/nightcore-tournament-web.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8098/tournaments.php >/tmp/tournament-page.html; then
+              break
+            fi
+            sleep 0.2
+          done
+          grep -q 'Creator Major' /tmp/tournament-page.html
+          curl -fsS http://127.0.0.1:8098/tournamentApi.php >/tmp/tournament-api.json
+          php -r '$payload=json_decode(file_get_contents("/tmp/tournament-api.json"), true, 512, JSON_THROW_ON_ERROR); if (($payload["ok"] ?? false) !== true || !is_array($payload["tournaments"] ?? null)) { fwrite(STDERR, "Tournament API smoke failed\n"); exit(1); }'
+          if grep -Eqi 'fatal error|parse error|uncaught' /tmp/nightcore-tournament-web.log; then
+            cat /tmp/nightcore-tournament-web.log
+            exit 1
+          fi
