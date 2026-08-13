@@ -1,0 +1,56 @@
+name: Tournament system
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tournament-system:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_DATABASE: nightcore_tournaments
+          MARIADB_USER: nightcore
+          MARIADB_PASSWORD: nightcore
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      APP_ENV: testing
+      APP_DEBUG: 1
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: nightcore_tournaments
+      DB_USER: nightcore
+      DB_PASS: nightcore
+      DB_CHARSET: utf8mb4
+      CORE_TABLE_PREFIX: tm_
+      ACCOUNT_PREACTIVATE: 1
+      AUTH_MAX_ATTEMPTS: 0
+      LEVEL_UPLOAD_COOLDOWN_SECONDS: 0
+      LEVEL_STORAGE_PATH: /tmp/nightcore-tournament-levels
+      TOURNAMENTS_MODE: enabled
+      TOURNAMENT_PREDICTIONS_MODE: enabled
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql
+          coverage: none
+      - name: Tournament PHP syntax
+        run: |
+          find src/Domain/Tournaments public tests -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Feature policy
+        run: php tests/tournament_feature_policy.php
+      - name: Bracket helpers
+        run: php tests/tournament_bracket_logic.php
+      - name: Full tournament lifecycle
+        run: php tests/tournament_system.php
