@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 use NightCore\Core\Application;
 use NightCore\Core\MigrationRunner;
+use NightCore\Domain\Moderation\StaffAccessService;
+use NightCore\Domain\Tournaments\TournamentFeaturePolicy;
+use NightCore\Domain\Tournaments\TournamentRepository;
+use NightCore\Domain\Tournaments\TournamentService;
 use NightCore\Security\PasswordService;
 
 $root = dirname(__DIR__);
@@ -24,6 +28,9 @@ try {
 
     foreach (['accounts', 'users', 'levels', 'core_auth_attempts', 'core_level_downloads'] as $table) {
         $assert($app->schema()->tableExists($table), 'missing table ' . $table);
+    }
+    foreach (['core_tournaments', 'core_tournament_participants', 'core_tournament_matches', 'core_tournament_predictions'] as $table) {
+        $assert($app->schema()->tableExists($table), 'missing tournament table ' . $table);
     }
 
     $assert($app->accounts()->register('IntegrationUser', 'secret', 'integration@example.test') === 1, 'account registration');
@@ -105,6 +112,77 @@ try {
     if ($stored !== false && $stored !== '') {
         $assert(is_file(rtrim($stored, '/\\') . DIRECTORY_SEPARATOR . $levelID), 'level file storage');
     }
+
+    $assert($app->accounts()->register('CreatorTwo', 'secret2', 'creator2@example.test') === 1, 'second creator registration');
+    $creatorTwoLogin = $app->accounts()->login('CreatorTwo', 'secret2', '', 'creator-two-udid', '127.0.0.2');
+    $assert((bool) preg_match('/^\d+,\d+$/', $creatorTwoLogin), 'second creator login');
+    [$creatorTwoAccountID] = array_map('intval', explode(',', $creatorTwoLogin));
+
+    $staff = new StaffAccessService($app->staffAccess()->repository(), [$accountID]);
+    $tournaments = new TournamentService(
+        new TournamentRepository($app->db(), $app->tables()),
+        new TournamentFeaturePolicy('enabled', 'enabled'),
+        $staff
+    );
+
+    $now = time();
+    $tournamentID = $tournaments->createTournament(
+        $accountID,
+        'integration-major',
+        'Integration Major',
+        $now - 60,
+        $now + 3600,
+        $now + 3600,
+        0,
+        2,
+        7,
+        ['badge' => 'match-pick'],
+        ['badge' => 'champion-pick'],
+        $now
+    );
+    $assert($tournamentID > 0, 'tournament creation');
+
+    $participantOne = $tournaments->addParticipant($accountID, $tournamentID, $accountID, 'IntegrationUser', 1, $now);
+    $participantTwo = $tournaments->addParticipant($accountID, $tournamentID, $creatorTwoAccountID, 'CreatorTwo', 2, $now);
+    $assert($participantOne > 0 && $participantTwo > 0, 'tournament participants');
+
+    $matchID = $tournaments->createMatch(
+        $accountID,
+        $tournamentID,
+        'final',
+        1,
+        $participantOne,
+        $participantTwo,
+        (int) $levelID,
+        null,
+        $now - 60,
+        $now + 600,
+        $now
+    );
+    $assert($matchID > 0, 'tournament match creation');
+    $assert($tournaments->setTournamentStatus($accountID, $tournamentID, 'open', $now), 'open tournament');
+    $assert($tournaments->setMatchStatus($accountID, $matchID, 'open', $now), 'open tournament match');
+
+    $championPredictionID = $tournaments->submitChampionPrediction($creatorTwoAccountID, $tournamentID, $participantOne, $now);
+    $matchPredictionID = $tournaments->submitMatchPrediction($creatorTwoAccountID, $matchID, $participantOne, $now);
+    $assert($championPredictionID > 0 && $matchPredictionID > 0, 'pickem submissions');
+
+    $resolvedMatchPredictions = $tournaments->resolveMatch($accountID, $matchID, $participantOne, $now + 10);
+    $assert($resolvedMatchPredictions === 1, 'match pickem resolution');
+    $resolvedChampionPredictions = $tournaments->completeTournament($accountID, $tournamentID, $participantOne, $now + 20);
+    $assert($resolvedChampionPredictions === 1, 'champion pickem resolution');
+
+    $leaderboard = $tournaments->predictionLeaderboard($tournamentID, 10);
+    $assert(count($leaderboard) === 1, 'pickem leaderboard row count');
+    $assert((int) ($leaderboard[0]['accountID'] ?? 0) === $creatorTwoAccountID, 'pickem leaderboard account');
+    $assert((int) ($leaderboard[0]['points'] ?? 0) === 9, 'pickem points total');
+    $assert((int) ($leaderboard[0]['correctPicks'] ?? 0) === 2, 'pickem correct picks');
+    $assert((int) ($leaderboard[0]['championCorrect'] ?? 0) === 1, 'pickem champion correct');
+
+    $reward = $tournaments->claimPredictionReward($creatorTwoAccountID, $championPredictionID, $now + 30);
+    $assert(is_array($reward), 'champion reward claim');
+    $assert(($reward['reward']['badge'] ?? '') === 'champion-pick', 'champion reward payload');
+    $assert($tournaments->claimPredictionReward($creatorTwoAccountID, $championPredictionID, $now + 31) === null, 'reward is one-time');
 } catch (Throwable $e) {
     $failures[] = 'exception: ' . $e->getMessage();
 }
