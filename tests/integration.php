@@ -113,10 +113,19 @@ try {
         $assert(is_file(rtrim($stored, '/\\') . DIRECTORY_SEPARATOR . $levelID), 'level file storage');
     }
 
-    $assert($app->accounts()->register('CreatorTwo', 'secret2', 'creator2@example.test') === 1, 'second creator registration');
-    $creatorTwoLogin = $app->accounts()->login('CreatorTwo', 'secret2', '', 'creator-two-udid', '127.0.0.2');
-    $assert((bool) preg_match('/^\d+,\d+$/', $creatorTwoLogin), 'second creator login');
-    [$creatorTwoAccountID] = array_map('intval', explode(',', $creatorTwoLogin));
+    // This is fixture setup, not a registration-flow test. Create the second creator
+    // directly so the tournament scenario does not consume the anti-abuse registration quota
+    // shared with later CI tests in the same MariaDB database.
+    $creatorTwoPassword = 'secret2';
+    $creatorTwoAccountID = $app->accountRepository()->create(
+        'CreatorTwo',
+        $passwords->hashPassword($creatorTwoPassword),
+        'creator2@example.test',
+        1,
+        $passwords->hashGjp2FromPassword($creatorTwoPassword)
+    );
+    $app->accountRepository()->ensureUser($creatorTwoAccountID, 'CreatorTwo');
+    $assert($creatorTwoAccountID > 0, 'second creator fixture');
 
     $staff = new StaffAccessService($app->staffAccess()->repository(), [$accountID]);
     $tournaments = new TournamentService(
