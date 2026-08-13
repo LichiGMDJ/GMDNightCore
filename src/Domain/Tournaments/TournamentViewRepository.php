@@ -71,6 +71,28 @@ final class TournamentViewRepository
         return $query->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** @return array<string,mixed>|null */
+    public function match(int $matchID): ?array
+    {
+        if ($matchID <= 0) {
+            return null;
+        }
+        $query = $this->db->prepare(
+            'SELECT m.*, p1.displayName participant1Name, p2.displayName participant2Name, w.displayName winnerName,'
+            . ' l1.levelName entry1LevelName, l2.levelName entry2LevelName'
+            . ' FROM ' . $this->tables->get('core_tournament_matches') . ' m'
+            . ' LEFT JOIN ' . $this->tables->get('core_tournament_participants') . ' p1 ON p1.participantID = m.participant1ID'
+            . ' LEFT JOIN ' . $this->tables->get('core_tournament_participants') . ' p2 ON p2.participantID = m.participant2ID'
+            . ' LEFT JOIN ' . $this->tables->get('core_tournament_participants') . ' w ON w.participantID = m.winnerParticipantID'
+            . ' LEFT JOIN ' . $this->tables->get('levels') . ' l1 ON l1.levelID = m.entry1LevelID'
+            . ' LEFT JOIN ' . $this->tables->get('levels') . ' l2 ON l2.levelID = m.entry2LevelID'
+            . ' WHERE m.matchID = :matchID LIMIT 1'
+        );
+        $query->execute([':matchID' => $matchID]);
+        $row = $query->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
     /** @return list<array<string,mixed>> */
     public function leaderboard(int $tournamentID, int $limit = 100): array
     {
