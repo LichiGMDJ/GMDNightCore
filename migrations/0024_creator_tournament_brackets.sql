@@ -1,6 +1,6 @@
 ALTER TABLE `{{prefix}}core_tournaments`
-    ADD COLUMN `description` TEXT NOT NULL AFTER `name`,
-    ADD COLUMN `rulesText` TEXT NOT NULL AFTER `description`,
+    ADD COLUMN `description` TEXT NOT NULL DEFAULT '' AFTER `name`,
+    ADD COLUMN `rulesText` TEXT NOT NULL DEFAULT '' AFTER `description`,
     ADD COLUMN `format` VARCHAR(32) NOT NULL DEFAULT 'single_elimination' AFTER `status`,
     ADD COLUMN `bracketSize` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `format`;
 
