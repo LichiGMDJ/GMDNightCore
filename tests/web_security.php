@@ -74,6 +74,8 @@ try {
     $assert($csrfRejected, 'invalid CSRF token is rejected');
 
     $security->signIn($provider->accounts[42], 100);
+    $assert(hash_equals($token, $security->csrfToken()), 'CSRF token survives sign-in session ID rotation');
+    $security->requireCsrf($token);
     $_SESSION['security_test_issued_at'] = 1;
     $_SESSION['security_test_last_seen'] = 1;
     $assert($security->validate(null, 500000), 'zero timeouts keep an otherwise valid session alive');
