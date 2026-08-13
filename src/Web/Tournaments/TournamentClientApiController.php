@@ -48,15 +48,19 @@ final class TournamentClientApiController
         }
 
         return match ($action) {
-            'state' => $this->result(200, $this->statePayload(
-                $account,
-                $this->positiveInt($input['tournamentID'] ?? 0)
-            )),
+            'state' => $this->state($account, $this->positiveInt($input['tournamentID'] ?? 0)),
             'champion_pick' => $this->championPick($account, $input),
             'match_pick' => $this->matchPick($account, $input),
             'claim_reward' => $this->claimReward($account, $input),
             default => $this->result(400, ['ok' => false, 'error' => 'unknown_action']),
         };
+    }
+
+    /** @param array<string,mixed> $account */
+    private function state(array $account, int $tournamentID): array
+    {
+        $payload = $this->statePayload($account, $tournamentID);
+        return $this->result(($payload['ok'] ?? false) ? 200 : 404, $payload);
     }
 
     /** @param array<string,mixed> $account @param array<string,mixed> $input */
@@ -93,15 +97,18 @@ final class TournamentClientApiController
             return $this->result(400, ['ok' => false, 'error' => 'invalid_prediction']);
         }
 
+        $match = $this->system->view()->match($matchID);
+        if ($match === null) {
+            return $this->result(404, ['ok' => false, 'error' => 'match_not_found']);
+        }
+
         $predictionID = $this->system->core()->submitMatchPrediction(
             (int) $account['accountID'],
             $matchID,
             $participantID
         );
 
-        $matches = $this->system->view()->matchesForMatchLookup($matchID);
-        $tournamentID = $matches === null ? 0 : (int) $matches['tournamentID'];
-        $payload = $this->statePayload($account, $tournamentID);
+        $payload = $this->statePayload($account, (int) $match['tournamentID']);
         $payload['result'] = [
             'action' => 'match_pick',
             'predictionID' => $predictionID,
@@ -134,11 +141,9 @@ final class TournamentClientApiController
     /** @param array<string,mixed> $account @return array<string,mixed> */
     private function statePayload(array $account, int $tournamentID): array
     {
-        if ($tournamentID <= 0) {
-            $rows = $this->system->view()->tournaments(50);
-            if ($rows !== []) {
-                $tournamentID = (int) $rows[0]['tournamentID'];
-            }
+        $tournaments = $this->system->view()->tournaments(50);
+        if ($tournamentID <= 0 && $tournaments !== []) {
+            $tournamentID = (int) $tournaments[0]['tournamentID'];
         }
 
         $payload = [
@@ -148,7 +153,7 @@ final class TournamentClientApiController
                 'accountID' => (int) $account['accountID'],
                 'userName' => (string) ($account['userName'] ?? ''),
             ],
-            'tournaments' => $this->system->view()->tournaments(50),
+            'tournaments' => $tournaments,
             'tournament' => null,
             'participants' => [],
             'matches' => [],
