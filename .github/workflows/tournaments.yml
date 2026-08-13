@@ -47,10 +47,28 @@ jobs:
           coverage: none
       - name: Tournament PHP syntax
         run: |
-          find src/Domain/Tournaments public tests -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+          find src/Domain/Tournaments src/Web/Tournaments public tests -type f -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Feature policy
         run: php tests/tournament_feature_policy.php
       - name: Bracket helpers
         run: php tests/tournament_bracket_logic.php
       - name: Full tournament lifecycle
         run: php tests/tournament_system.php
+      - name: Tournament web and API smoke
+        run: |
+          php -S 127.0.0.1:8098 -t public >/tmp/nightcore-tournament-web.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8098/tournaments.php >/tmp/tournament-page.html; then
+              break
+            fi
+            sleep 0.2
+          done
+          grep -q 'Creator Major' /tmp/tournament-page.html
+          curl -fsS http://127.0.0.1:8098/tournamentApi.php >/tmp/tournament-api.json
+          php -r '$payload=json_decode(file_get_contents("/tmp/tournament-api.json"), true, 512, JSON_THROW_ON_ERROR); if (($payload["ok"] ?? false) !== true || !is_array($payload["tournaments"] ?? null)) { fwrite(STDERR, "Tournament API smoke failed\n"); exit(1); }'
+          if grep -Eqi 'fatal error|parse error|uncaught' /tmp/nightcore-tournament-web.log; then
+            cat /tmp/nightcore-tournament-web.log
+            exit 1
+          fi
