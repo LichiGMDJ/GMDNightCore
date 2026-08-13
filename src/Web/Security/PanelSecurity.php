@@ -115,7 +115,11 @@ final class PanelSecurity
         $_SESSION[$this->key('issued_at')] = $now;
         $_SESSION[$this->key('last_seen')] = $now;
         $_SESSION[$this->key('fingerprint')] = $this->fingerprint;
-        unset($_SESSION[$this->key('csrf')]);
+
+        // Keep the existing CSRF token when rotating the PHP session ID.
+        // Forms rendered immediately before/after login therefore stay valid,
+        // while the session cookie is still regenerated against fixation.
+        $this->csrfToken();
 
         $this->accountID = $accountID;
         $this->account = $account;
